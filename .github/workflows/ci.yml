@@ -1,0 +1,213 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  # HF hub falls back to copying files (with a loud warning) when symlinks
+  # need developer mode, which isn't enabled on GitHub's Windows runners.
+  HF_HUB_DISABLE_SYMLINKS_WARNING: 1
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: pip install ruff
+      - name: ruff check
+        run: ruff check .
+      - name: ruff format --check
+        run: ruff format --check .
+
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Full Python range on Linux; only the range's endpoints on macOS
+          # (arm64 -- exercises the MPS auto-detect path) and Windows, to
+          # keep the matrix from growing to OS x every Python.
+          - { os: ubuntu-latest, python-version: "3.10" }
+          - { os: ubuntu-latest, python-version: "3.11" }
+          - { os: ubuntu-latest, python-version: "3.12" }
+          - { os: ubuntu-latest, python-version: "3.13" }
+          - { os: macos-latest, python-version: "3.10" }
+          - { os: macos-latest, python-version: "3.13" }
+          - { os: windows-latest, python-version: "3.10" }
+          - { os: windows-latest, python-version: "3.13" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # The default torch wheel on Linux pulls in CUDA and routinely blows
+      # past the runner's disk quota; CI only needs CPU inference. macOS
+      # wheels are CPU-only already; Windows has no separate CPU index.
+      - name: Install CPU-only torch (Linux)
+        if: runner.os == 'Linux'
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install torch
+        if: runner.os != 'Linux'
+        run: pip install torch
+
+      - name: Install package
+        run: pip install -e ".[dev]"
+
+      - name: Run tests (no weights download)
+        run: |
+          pytest -q -m "not weights" --cov=plmsommelier --cov-report=term-missing | tee pytest-output.txt
+          echo "## Test results (${{ matrix.os }}, Python ${{ matrix.python-version }})" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -n 30 pytest-output.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+        shell: bash
+
+  torch-versions:
+    # A handful of pinned torch releases against the Python each has wheels
+    # for, so a real regression against an older torch shows up here instead
+    # of a user's cluster. Linux + CPU wheels only -- this axis is about
+    # torch compatibility, not OS coverage (the `test` job covers that).
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { python-version: "3.10", torch: "2.4.*" }
+          - { python-version: "3.11", torch: "2.6.*" }
+          - { python-version: "3.12", torch: "2.8.*" }
+          - { python-version: "3.13", torch: "2.9.*" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install "torch==${{ matrix.torch }}" --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install -e ".[dev]"
+      - run: pytest -q -m "not weights"
+
+  torch-nightly:
+    # Early warning for an upcoming torch release breaking us; not a merge gate.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
+      - run: pip install -e ".[dev]"
+      - run: pytest -q -m "not weights"
+
+  floors:
+    # Installs every dependency at the version pyproject.toml actually
+    # declares as its floor. Without this job a floor can silently rot --
+    # `torch>=2.11.0` sat in this repo declaring a requirement that nothing
+    # in the code needed, because normal installs always resolve newer.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv venv --python ${{ matrix.python-version }}
+      - name: Install at declared minimums
+        run: uv pip install --resolution lowest-direct --index-strategy unsafe-best-match ".[dev]"
+      - run: uv run pytest -q -m "not weights"
+
+  cuda-wheels:
+    # No GPU on hosted runners, so this can't run a kernel -- but it proves
+    # the real cu126/cu128/cu130 wheel resolves cleanly against every other
+    # dependency and that nothing here hard-imports a CUDA-only package. That
+    # covers most real "doesn't work on CUDA 12/13" reports.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cuda: [cu126, cu128, cu130]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Free disk space
+        # CUDA wheels plus their nvidia-* deps are several GB and will
+        # otherwise exhaust the runner's disk quota.
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
+      - run: pip install torch --index-url https://download.pytorch.org/whl/${{ matrix.cuda }}
+      - run: pip install -e ".[dev]"
+      - run: pip check
+      - run: python -c "import torch, plmsommelier; print(torch.__version__, torch.version.cuda)"
+      - run: pytest -q -m "not weights"
+
+  bare-install:
+    # No extras at all -- catches an optional dependency (e.g. the `plot`
+    # extra's matplotlib) leaking into a top-level import.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install .
+      - run: python -c "import plmsommelier"
+      - run: plmsommelier --help
+
+  build-artifacts:
+    # Installs the built sdist AND wheel into a clean venv, from outside the
+    # repo, on every OS. `pip install -e .` (used by every job above) puts
+    # the source tree on sys.path and so never exercises the build backend
+    # or catches missing package data -- only a real sdist/wheel install does.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install CPU-only torch (Linux)
+        if: runner.os == 'Linux'
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install torch
+        if: runner.os != 'Linux'
+        run: pip install torch
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check dist/*
+      # bash is available on every GitHub-hosted runner including Windows
+      # (Git Bash); a venv's executables live under bin/ on POSIX and
+      # Scripts/ on Windows, so pick whichever exists rather than branching
+      # per OS.
+      - name: Install and run the wheel from a clean venv
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/wheel-venv"
+          VENV_BIN="$RUNNER_TEMP/wheel-venv/bin"
+          [ -d "$VENV_BIN" ] || VENV_BIN="$RUNNER_TEMP/wheel-venv/Scripts"
+          "$VENV_BIN/pip" install dist/*.whl
+          "$VENV_BIN/plmsommelier" --help
+      - name: Install the sdist from a clean venv
+        # This is the one that actually exercises setuptools.build_meta and
+        # therefore catches a build-backend metadata problem (e.g. a PEP 639
+        # `license-files` declaration with too old a setuptools floor).
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/sdist-venv"
+          VENV_BIN="$RUNNER_TEMP/sdist-venv/bin"
+          [ -d "$VENV_BIN" ] || VENV_BIN="$RUNNER_TEMP/sdist-venv/Scripts"
+          "$VENV_BIN/pip" install dist/*.tar.gz

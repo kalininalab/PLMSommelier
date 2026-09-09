@@ -1,0 +1,47 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the underlying paper."
+title: PLMSommelier
+type: software
+version: 0.1.0
+date-released: "2026-09-08"
+abstract: >-
+  Given a dataset and a HuggingFace protein language model checkpoint, find
+  the best layer for that dataset and return a truncated model. Implements
+  the practical takeaway of "Task- and dataset-specific information in
+  protein language models" (Joeres, Senatorov, Kolchina, Klakow & Kalinina,
+  arXiv:2608.12090).
+authors:
+  - family-names: Joeres
+    given-names: Roman
+  - family-names: Senatorov
+    given-names: Ilya
+keywords:
+  - protein language model
+  - layer selection
+  - probing
+  - esm
+  - bioinformatics
+repository-code: "https://github.com/kalininalab/PLMSommelier"
+url: "https://github.com/kalininalab/PLMSommelier"
+license: MIT
+identifiers:
+  - type: other
+    value: "arXiv:2608.12090"
+    description: "arXiv preprint of the underlying paper"
+preferred-citation:
+  type: article
+  title: "Task- and dataset-specific information in protein language models"
+  authors:
+    - family-names: Joeres
+      given-names: Roman
+    - family-names: Senatorov
+      given-names: Ilya
+    - family-names: Kolchina
+      given-names: Anastasia
+    - family-names: Klakow
+      given-names: Dietrich
+    - family-names: Kalinina
+      given-names: Olga V.
+  journal: "arXiv preprint arXiv:2608.12090"
+  year: 2026
+  url: "https://arxiv.org/abs/2608.12090"

@@ -1,0 +1,63 @@
+name: Bug report
+description: Something in plmsommelier isn't working as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: The `--model` value you passed (preset key, alias, or HF id).
+      placeholder: facebook/esm2_t33_650M_UR50D
+    validations:
+      required: true
+  - type: dropdown
+    id: task
+    attributes:
+      label: Task
+      options:
+        - regression
+        - binary
+        - multi-class
+        - multi-label
+        - not applicable / other
+    validations:
+      required: false
+  - type: textarea
+    id: command
+    attributes:
+      label: Exact command you ran
+      render: shell
+    validations:
+      required: false
+  - type: textarea
+    id: traceback
+    attributes:
+      label: Traceback / error output
+      render: text
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: plmsommelier / torch / transformers versions
+      placeholder: "plmsommelier 0.1.0, torch 2.4.0, transformers 4.44.0"
+    validations:
+      required: false
+  - type: textarea
+    id: platform
+    attributes:
+      label: Platform / GPU details
+      description: |
+        Only relevant for device- or CUDA-related bugs, but usually the key
+        diagnostic for those. Paste the output of:
+          python -c "import torch, platform; print(platform.platform()); print('torch', torch.__version__, '| cuda build', torch.version.cuda); print('cuda available', torch.cuda.is_available()); print('arch list', torch.cuda.get_arch_list() if torch.cuda.is_available() else 'n/a')"
+      render: text
+    validations:
+      required: false
