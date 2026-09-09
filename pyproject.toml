@@ -32,7 +32,7 @@ dependencies = [
     "cyclopts>=3",
     "numpy>=2.1",  # first release with cp313 wheels; older sdists fail to build (distutils removed in 3.12)
     "pandas>=2.2.3",  # first release with cp313 wheels; older sdists fail to build (needs setuptools' removed pkg_resources)
-    "scikit-learn>=1.3",
+    "scikit-learn>=1.5.2",  # first release with cp313 wheels; older sdists fail to build (Cython too old for 3.13)
     "torch>=2.5",  # transformers>=5.9,<6 disables torch entirely below 2.5
     "transformers>=5.9,<6",
     "sentencepiece>=0.2.1",  # first release with cp312/cp313 wheels
