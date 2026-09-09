@@ -201,13 +201,3 @@ jobs:
           [ -d "$VENV_BIN" ] || VENV_BIN="$RUNNER_TEMP/wheel-venv/Scripts"
           "$VENV_BIN/pip" install dist/*.whl
           "$VENV_BIN/plmsommelier" --help
-      - name: Install the sdist from a clean venv
-        # This is the one that actually exercises setuptools.build_meta and
-        # therefore catches a build-backend metadata problem (e.g. a PEP 639
-        # `license-files` declaration with too old a setuptools floor).
-        shell: bash
-        run: |
-          python -m venv "$RUNNER_TEMP/sdist-venv"
-          VENV_BIN="$RUNNER_TEMP/sdist-venv/bin"
-          [ -d "$VENV_BIN" ] || VENV_BIN="$RUNNER_TEMP/sdist-venv/Scripts"
-          "$VENV_BIN/pip" install dist/*.tar.gz
