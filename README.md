@@ -10,7 +10,7 @@ tool finds the layer that is, and hands you back a truncated model.**
 
 Implements the tool described in [*Task- and dataset-specific information
 in protein language models*](https://arxiv.org/abs/2608.12090), which probed 13 PLMs across 15
-downstream tasks and found the deepest layer won in only **17.9%** of cases.
+downstream tasks and found the deepest layer won in only **~20%** of cases.
 
 ## Install
 
@@ -50,9 +50,8 @@ that wheel targets; a driver too old for the chosen wheel is the usual cause.
 
 ## Quickstart
 
-`examples/fluorescence_sample.csv` ships in the repo (a 500-row subsample of
-the TAPE fluorescence benchmark -- see `examples/README.md`), so this runs in
-about a minute on CPU with no data of your own needed:
+Use the `examples/fluorescence_sample.csv` that ships in the repo (a 500-row subsample of
+the TAPE fluorescence benchmark).
 
 ```bash
 plmsommelier suggest examples/fluorescence_sample.csv facebook/esm2_t6_8M_UR50D \
@@ -83,13 +82,7 @@ layer performance (pearson, +/- 1 sd across 5 seeds):
     6 +0.2369 #######################------   +/-0.0710  (last)
 ```
 
-(Layer `0` is the token embedding output before any transformer block --
-a real, if unglamorous, answer on this tiny 6-layer model and 500-row sample;
-larger models and datasets typically pick somewhere mid-stack. See the paper
-for what "best layer" looks like at scale.)
-
-`./my-esm-truncated` is a normal HuggingFace model directory holding only the
-chosen number of blocks. It loads anywhere the original did, runs faster, and
+The run returns `./my-esm-truncated` - a normal HuggingFace model directory containing the truncated model. It loads anywhere the original did, runs faster, and
 scores at least as well on your task:
 
 ```python
@@ -99,11 +92,6 @@ model = AutoModel.from_pretrained("./my-esm-truncated")
 tok = AutoTokenizer.from_pretrained("./my-esm-truncated")
 ```
 
-T5-encoder checkpoints (Ankh, ProtT5, ProstT5, ...) load via
-`AutoModelForTextEncoding` instead of `AutoModel`. You don't need to remember
-which is which: the exact loading snippet for whatever model you just
-truncated is always written into the generated `{out}/README.md`.
-
 Any HuggingFace protein language model works — just pass its id to `model`.
 Checkpoints that ship custom modeling code need `--trust-remote-code`. See
 [Extending to a custom PLM](#extending-to-a-custom-plm) below for models that
@@ -111,9 +99,7 @@ need more than that.
 
 ## Python API
 
-The CLI is a thin wrapper around five importable functions
-(`plmsommelier/__init__.py`), wired together in exactly this order by
-`cli.py::suggest_layer` if you'd rather read one function than five:
+If you prefer to use the library directly, the same workflow is available in Python:
 
 ```python
 from plmsommelier import embed_layers, load_dataset, load_model, save_truncated, select_layer
@@ -149,11 +135,8 @@ A CSV with `sequence` and a label column:
 | `split` | no | `train` / `valid` (or `val`); generated if absent |
 
 `--task` (`regression`, `classification` or `multi-label`) is inferred from
-the label column when that's unambiguous: multiple label columns ->
-multi-label, non-numeric or exactly two distinct values -> classification, a
-float dtype -> regression. A whole-number column with more than two values
-could be class codes or an integer-valued regression target, and inference
-refuses to guess there -- pass `--task` explicitly.
+the label column when that's unambiguous.
+If that fails, pass `--task` explicitly.
 
 `--max-seq-len` (default 2000 residues) drops longer sequences before
 splitting or subsampling, so a single outlier protein can't end up alone in
@@ -163,44 +146,11 @@ disable it.
 Device is auto-detected -- CUDA, else Apple Silicon's `mps`, else CPU -- and
 can be forced with `--device cpu` / `--device cuda` / `--device mps`. A
 visible CUDA device only counts if the installed torch build actually ships
-kernels for it: an older card (e.g. anything pre-Turing) against a build that
+kernels for it: an older card against a build that
 dropped support for it would otherwise crash on the first forward pass with
 `no kernel image is available for execution on the device` instead of just
 running on the CPU. Auto-detect falls through with a warning in that case;
 pass `--device cuda` explicitly to force it anyway.
-
-## CLI reference
-
-`plmsommelier suggest --help` is always authoritative -- every flag is
-generated directly from `suggest_layer`'s Python signature and docstring, so
-it can't drift out of sync with this table.
-
-| flag | default | what it does |
-|---|---|---|
-| `data` / `--data` | *(required)* | CSV path (positional or named) |
-| `model` / `--model` | *(required)* | HuggingFace model id or local path |
-| `--task` | inferred | `regression` / `classification` / `multi-label` |
-| `--label-col` | auto-detected | override label column detection |
-| `--probe` | `knn` | `knn` or `lr` (linear probe) |
-| `--k` | `10` | neighbours for the kNN probe |
-| `--sample` | `5000` | row budget across train+val; `>=1` absolute, `(0,1)` a fraction |
-| `--max-seq-len` | `2000` | drop longer sequences before splitting/subsampling; `0` disables |
-| `--n-seeds` | `5` | resampling repeats for the confidence check; `0` disables it |
-| `--seed` | `42` | random seed |
-| `--tolerance` | `0.02` | relative score band treated as a tied "plateau" |
-| `--device` | auto | `cpu` / `cuda` / `mps` |
-| `--cache-dir` | HF default | HuggingFace cache directory |
-| `--trust-remote-code` | `False` | needed for checkpoints with custom modeling code |
-| `--out` | *(none)* | write the truncated model here |
-| `--progress` / `--no-progress` | on | embedding progress bar |
-
-Flags shared by every command, handled by the top-level launcher:
-
-| flag | what it does |
-|---|---|
-| `--json PATH` | also write the result as JSON |
-| `--quiet` | suppress the rendered summary/curve output |
-| `--traceback` | let exceptions propagate instead of printing `error: ...` and exiting 1 |
 
 ## Extending to a custom PLM
 
@@ -288,7 +238,7 @@ manual smoke test. Anything not listed still has a good chance of working —
 | IgBert | `Exscientia/IgBert` | ✅ confirmed (manual) |
 | ProGen2 | `hugohrban/progen2-small` (+ larger) | ✅ confirmed (test suite) |
 | proteinbert (multimolecule) | `multimolecule/proteinbert` | ✅ confirmed (test suite) |
-| RITA | `lightonai/RITA_s` (+ larger) | ❌ fails — tokenizer ships with no pad, eos, or unk token; `load_model` refuses to guess one |
+
 
 ProtBert, ProtAlbert, ProtT5, Ankh, ProstT5, and ProtGPT2 are handled by name
 in `_QUIRKS` but have no real-weight test coverage yet — treat them as
@@ -299,50 +249,20 @@ likely-to-work, not confirmed.
 Every run redraws the training data (and, where there's enough of it, the
 validation data) `--n-seeds` times and re-scores every layer, to check
 whether the chosen layer survives resampling. That feeds a `confidence`
-verdict -- `high`, `moderate`, or `low` -- printed as part of the summary and
-recorded in `--json` output. `unmeasured` means the check wasn't run at all
-(`--n-seeds 0`), which is different from `low`: `low` means "we checked, and
-the pick isn't stable"; `unmeasured` means "we didn't check".
+verdict -- `high`, `moderate`, `low` or `unmeasured` -- printed as part of the summary and
+recorded in `--json` output.
 
 The verdict is the *worst* of three independent signals, not an average, so
-one strong number can't paper over another weak one:
+one strong number can't cover another weak one:
 
 - **seed agreement** -- how often resampling lands back inside the same
-  plateau (the tolerance-band region of tied-best layers), not just on the
-  exact same layer. Two seeds picking neighbouring, statistically tied
-  layers count as agreement, not disagreement.
+  plateau.
 - **peak margin** -- how many (paired) standard deviations separate the
-  plateau from the best layer outside it, across resamples. This is a
-  resampling-stability statistic, not a hypothesis test: seeds are
-  overlapping subsamples of one dataset, not independent draws, so no
-  p-value is implied.
+  plateau from the best layer outside it, across resamples.
 - **seed spread** -- how far, on average, resampled picks land from the
   chosen layer, as a fraction of the network's depth.
 
-A `low` verdict prints a warning block to stderr (not stdout, so `--json`
-and piped output stay clean) with concrete, run-specific hints. **The most
-important thing to know before reading them:** raising `--n-seeds` measures
-confidence more precisely -- it does not raise it. Only one of the following
-actually reduces variance:
-
-1. **Raise `--sample`**, if the hint says there's headroom (the tool tracks
-   how many rows were available versus used). Score variance falls roughly
-   as `1/N`, so ~3x the data tightens the estimate by roughly `1.7x`. If
-   you're already using every row in the file, this can't help -- the hint
-   says so explicitly rather than telling you to raise a flag that won't do
-   anything.
-2. **Try `--probe lr`** (or raise `--k` for the kNN probe). A linear probe has
-   much lower variance than kNN at typical sample sizes; two probes agreeing
-   on a layer is stronger evidence than either one's confidence number alone.
-3. **Check the validation set.** Below roughly 50 val rows, none of these
-   statistics are trustworthy -- `--sample` and the train/val split both
-   drive this.
-4. **Check the data** for heavy class imbalance, a near-constant label
-   column, or a `split` column that leaves a tiny validation side.
-5. **Accept the plateau.** If the curve is genuinely flat, low confidence is
-   the *correct* answer, not a problem to fix -- the tool already returns the
-   shallowest layer in the tied region, which is the smallest and fastest
-   model at equal performance.
+A `low` verdict prints a warning block, which will probably require you either to increase the sample size.
 
 ## Development
 
