@@ -13,6 +13,7 @@ from __future__ import annotations
 import copy
 import importlib
 import json
+import math
 import warnings
 from contextlib import contextmanager
 from pathlib import Path
@@ -21,6 +22,7 @@ from typing import Any
 import numpy as np
 import torch
 from torch import nn
+from tqdm import tqdm
 
 __all__ = ["PLM", "load_model", "embed_layers", "truncate", "save_truncated"]
 
@@ -300,11 +302,10 @@ def _v4_style_init():
 def load_hf_model(
     source,
     *,
-    encoder_only: bool | None,
+    encoder_only: bool,
     dtype: torch.dtype | None = None,
     trust_remote_code: bool = False,
     cache_dir: str | None = None,
-    config=None,
 ):
     """Load a HF model, choosing the loader class that matches how it was saved.
 
@@ -325,9 +326,6 @@ def load_hf_model(
         cache_dir=cache_dir,
         torch_dtype=dtype if dtype is not None else torch.float32,
     )
-
-    if encoder_only is None and config is not None:
-        encoder_only = bool(getattr(config, "is_encoder_decoder", False))
 
     def _load():
         if encoder_only:
@@ -374,18 +372,23 @@ class PLM:
         self.device = device
         self.quirks = quirks
 
-        owner, attr, blocks = locate_blocks(model)
-        self.n_layers = len(blocks)
-        self._final_norm = locate_final_norm(owner)
+        # ALBERT re-applies one shared layer group `num_hidden_layers` times:
+        # there is no block list to count or slice, and no final norm.
+        self._shared_layers = getattr(config, "model_type", "") == "albert"
+        if self._shared_layers:
+            self._final_norm = None
+        else:
+            owner, _, blocks = locate_blocks(model)
+            self.n_layers = len(blocks)
+            self._final_norm = locate_final_norm(owner)
         limits = [
             lim for lim in (_length_limit(tokenizer, config), _causal_mask_limit(model)) if lim
         ]
         self._max_length = min(limits) if limits else None
         self._warned_truncation = False
         self._warm_up()
-
-    def _preprocess(self, seq: str) -> str:
-        return _preprocess_text(seq, self.quirks)
+        if self._shared_layers:
+            self.n_layers = self.n_states - 1
 
     def _encode(self, sequences: list[str]) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
         """Tokenize and return ``(model_inputs, pool_mask)``.
@@ -393,7 +396,7 @@ class PLM:
         ``pool_mask`` is what whole-protein pooling averages over: every real
         token that is not a special one (``<cls>``, ``<eos>``, padding, ...).
         """
-        texts = [self._preprocess(s) for s in sequences]
+        texts = [_preprocess_text(s, self.quirks) for s in sequences]
 
         enc = self.tokenizer(
             texts,
@@ -481,16 +484,16 @@ def _arch_supports(device_cc: tuple[int, int], arches: list[str]) -> bool:
 
     A cubin built for ``sm_X`` runs on a device of the *same major* version whose
     capability is >= X (minor-version forward compatibility); a ``compute_X``
-    entry ships PTX the driver can JIT under the same rule.
+    entry ships PTX the driver can JIT for *any* capability >= X.
     """
     major, minor = device_cc
     cc = major * 10 + minor
     for arch in arches:
-        _, _, digits = arch.partition("_")
+        kind, _, digits = arch.partition("_")
         if not digits.isdigit():
             continue
         target = int(digits)
-        if target // 10 == major and cc >= target:
+        if cc >= target and (kind == "compute" or target // 10 == major):
             return True
     return False
 
@@ -542,14 +545,12 @@ def _bf16_is_usable(device: torch.device) -> bool:
     """MPS has no (or, on older torch, incomplete) bfloat16 support. CUDA's
     ``is_bf16_supported`` is the authority to defer to rather than a compute
     capability guess of our own -- but only when asked about *real* hardware
-    support. On torch >= 2.6 the no-argument call defaults to
-    ``including_emulation=True`` and reports ``True`` on pre-Ampere cards
-    (e.g. Turing, sm_75) that merely emulate bf16 in software: the model
-    loads fine and halves its memory footprint, but matmuls get no
-    tensor-core speedup, silently making a "bf16" run look like a size
-    optimization when it's actually running at roughly fp32 speed. Ask for
-    ``including_emulation=False`` explicitly; older torch that doesn't know
-    the kwarg falls back to the plain call.
+    support. The no-argument call defaults to ``including_emulation=True``
+    and reports ``True`` on pre-Ampere cards (e.g. Turing, sm_75) that merely
+    emulate bf16 in software: the model loads fine and halves its memory
+    footprint, but matmuls get no tensor-core speedup, silently making a
+    "bf16" run look like a size optimization when it's actually running at
+    roughly fp32 speed.
     """
     if device.type == "mps":
         return False
@@ -557,12 +558,6 @@ def _bf16_is_usable(device: torch.device) -> bool:
         return True
     try:
         return bool(torch.cuda.is_bf16_supported(including_emulation=False))
-    except TypeError:
-        pass  # older torch that doesn't know the kwarg -- fall back below
-    except Exception:
-        return False
-    try:
-        return bool(torch.cuda.is_bf16_supported())
     except Exception:
         return False
 
@@ -631,6 +626,7 @@ def load_model(
     common = dict(trust_remote_code=trust_remote_code, cache_dir=cache_dir)
     config = _load_config(model_id, **common)
     quirks = dict(_QUIRKS.get(getattr(config, "model_type", ""), {}))
+    quirks.setdefault("encoder_only", bool(getattr(config, "is_encoder_decoder", False)))
     if "prostt5" in model_id.lower():
         # <AA2fold> is an ordinary added token giving the translation
         # direction; every other T5-family quirk still applies.
@@ -654,11 +650,10 @@ def load_model(
 
     hf_model = load_hf_model(
         model_id,
-        encoder_only=quirks.get("encoder_only"),
+        encoder_only=quirks["encoder_only"],
         dtype=resolved_dtype,
         trust_remote_code=trust_remote_code,
         cache_dir=cache_dir,
-        config=config,
     )
     hf_model = hf_model.to(device).eval()
 
@@ -719,16 +714,7 @@ def embed_layers(
     out = np.zeros((plm.n_states, len(sequences), plm.hidden_size), dtype=np.float16)
     batches = _batches(lengths, max_tokens_per_batch, max_batch_size)
 
-    iterator = batches
-    if progress:
-        try:
-            from tqdm import tqdm
-
-            iterator = tqdm(batches, desc="embedding", unit="batch")
-        except ImportError:
-            pass
-
-    for group in iterator:
+    for group in tqdm(batches, desc="embedding", unit="batch", disable=not progress):
         states, pool_mask = plm.forward([sequences[i] for i in group])
         for slot, seq_i in enumerate(group):
             valid = pool_mask[slot]
@@ -750,17 +736,20 @@ def truncate(plm: PLM, layer: int) -> nn.Module:
     if not 0 <= layer <= plm.n_layers:
         raise ValueError(f"layer must be in [0, {plm.n_layers}], got {layer}")
 
-    # Deep-copying the full model first (then discarding blocks) needs a
-    # second full-size resident copy at its peak. Instead, temporarily shrink
-    # the *original* model's block list to just the retained blocks,
-    # deepcopy that, then restore the original list unconditionally.
-    owner, attr, blocks = locate_blocks(plm.model)
-    full_blocks = blocks
-    try:
-        setattr(owner, attr, nn.ModuleList(list(blocks)[:layer]))
+    if plm._shared_layers:
+        # Shared weights: the config's depth *is* the truncation.
         truncated = copy.deepcopy(plm.model)
-    finally:
-        setattr(owner, attr, full_blocks)
+    else:
+        # Deep-copying the full model first (then discarding blocks) needs a
+        # second full-size resident copy at its peak. Instead, temporarily
+        # shrink the *original* model's block list to just the retained
+        # blocks, deepcopy that, then restore the original list unconditionally.
+        owner, attr, blocks = locate_blocks(plm.model)
+        try:
+            setattr(owner, attr, nn.ModuleList(list(blocks)[:layer]))
+            truncated = copy.deepcopy(plm.model)
+        finally:
+            setattr(owner, attr, blocks)
 
     _set_depth(truncated.config, layer)
     _resize_layer_dependent_heads(truncated, layer)
@@ -880,12 +869,9 @@ def _model_card(
     result, plm: PLM, layer: int, model_cls: str, out: Path, *, trust_remote_code: bool
 ) -> str:
     gain = result.gain_over_last
-    gain_txt = "n/a" if gain != gain else f"{gain:+.1%}"
-    seed_agreement_txt = (
-        "n/a"
-        if result.seed_agreement != result.seed_agreement
-        else (f"{result.seed_agreement:.0%}")
-    )
+    gain_txt = "n/a" if math.isnan(gain) else f"{gain:+.1%}"
+    agreement = result.seed_agreement
+    seed_agreement_txt = "n/a" if math.isnan(agreement) else f"{agreement:.0%}"
     load_kwargs = ", trust_remote_code=True" if trust_remote_code else ""
 
     registry_entry = _REGISTRY_PACKAGES.get(getattr(plm.config, "model_type", ""))
@@ -947,10 +933,7 @@ def save_truncated(plm: PLM, result, out_dir: str | Path) -> Path:
 
     model = truncate(plm, layer)
 
-    encoder_only = plm.quirks.get("encoder_only")
-    if encoder_only is None:
-        encoder_only = bool(getattr(plm.config, "is_encoder_decoder", False))
-    model_cls = "AutoModelForTextEncoding" if encoder_only else "AutoModel"
+    model_cls = "AutoModelForTextEncoding" if plm.quirks["encoder_only"] else "AutoModel"
     trust_remote_code = _is_remote_code(model)
     _prepare_remote_code_for_save(model, model_cls)
 

@@ -205,21 +205,16 @@ def _low_confidence_result(**overrides) -> Result:
 
 class TestConfidenceWarningBlock:
     def test_low_confidence_prints_to_stderr_not_stdout(self, capsys):
-        _render_confidence_warning(_low_confidence_result(), quiet=False)
+        _render_confidence_warning(_low_confidence_result())
         out, err = capsys.readouterr()
         assert out == ""
         assert "LOW CONFIDENCE" in err
         assert "raise --sample" in err
 
-    def test_quiet_suppresses_the_block(self, capsys):
-        _render_confidence_warning(_low_confidence_result(), quiet=True)
-        out, err = capsys.readouterr()
-        assert out == err == ""
-
     def test_unmeasured_does_not_print_the_block(self, capsys):
         r = _low_confidence_result(seed_layers=[], seed_curves=[], seed_agreement=float("nan"))
         assert r.confidence == "unmeasured"
-        _render_confidence_warning(r, quiet=False)
+        _render_confidence_warning(r)
         out, err = capsys.readouterr()
         assert out == err == ""
 
@@ -234,7 +229,7 @@ class TestConfidenceWarningBlock:
             ],
         )
         assert r.confidence != "low"
-        _render_confidence_warning(r, quiet=False)
+        _render_confidence_warning(r)
         out, err = capsys.readouterr()
         assert out == err == ""
 
@@ -297,6 +292,17 @@ class TestInvalidLiteralChoices:
         with pytest.raises(SystemExit) as exc_info:
             app.parse_args(["suggest", "--data", "x.csv", "--model", "m", flag, bad_value])
         assert exc_info.value.code != 0
+
+
+class TestNoCommand:
+    def test_bare_invocation_prints_help_and_exits_zero(self, capsys, tmp_path):
+        """Regression: with no command, cyclopts prints help and hands back
+        None, which the launcher used to call `.summary()` on."""
+        with pytest.raises(SystemExit) as exc_info:
+            main(["--json", str(tmp_path / "r.json")])
+        assert exc_info.value.code == 0
+        assert "suggest" in capsys.readouterr().out
+        assert not (tmp_path / "r.json").exists()
 
 
 class TestLauncherMetaFlags:

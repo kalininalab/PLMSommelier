@@ -221,10 +221,13 @@ class TestLoadDataset:
         with pytest.raises(ValueError, match="multi-label"):
             load_dataset(path, task="multi-label")
 
-    def test_multi_label_names_the_actually_non_numeric_column(self, tmp_path):
+    @pytest.mark.parametrize("task", ["multi-label", None])
+    def test_multi_label_names_the_actually_non_numeric_column(self, tmp_path, task):
         """Regression test: the non-numeric check used to test the whole
         stacked label array on every column, so every column -- including
-        genuinely numeric ones -- was reported as non-numeric."""
+        genuinely numeric ones -- was reported as non-numeric. An *inferred*
+        multi-label task used to skip the check entirely and die later with
+        "could not convert string to float"."""
         n = 40
         path = _write(
             tmp_path,
@@ -232,7 +235,7 @@ class TestLoadDataset:
             _frame(n, a=np.arange(n) % 2, b=["x", "y"] * (n // 2)),
         )
         with pytest.raises(ValueError, match=r"non-numeric \['b'\]"):
-            load_dataset(path, task="multi-label", label_col=["a", "b"])
+            load_dataset(path, task=task, label_col=["a", "b"])
 
     def test_train_val_share_one_code_space(self, tmp_path):
         """A class present in only one split still gets a stable code, so

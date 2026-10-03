@@ -152,7 +152,7 @@ def infer_task(y: np.ndarray, label_cols: list[str]) -> Task:
 
 
 def _validate_task(task: Task, y: np.ndarray, label_cols: list[str], df: pd.DataFrame) -> None:
-    """Check an explicitly-supplied ``task`` is consistent with the data."""
+    """Check ``task`` (explicit or inferred) is consistent with the data."""
     if task == "multi-label":
         if len(label_cols) == 1:
             raise ValueError(
@@ -310,11 +310,8 @@ def load_dataset(
     inference_y = (
         df[label_cols[0]].to_numpy() if len(label_cols) == 1 else df[label_cols].to_numpy()
     )
-    if task is not None:
-        _validate_task(task, inference_y, label_cols, df)
-        resolved_task: Task = task
-    else:
-        resolved_task = infer_task(inference_y, label_cols)
+    resolved_task: Task = task or infer_task(inference_y, label_cols)
+    _validate_task(resolved_task, inference_y, label_cols, df)
 
     df = df.dropna(subset=label_cols)
 

@@ -145,7 +145,7 @@ def suggest_layer(
 app.command(suggest_layer, name="suggest")
 
 
-def _render_confidence_warning(result: Result, *, quiet: bool) -> None:
+def _render_confidence_warning(result: Result) -> None:
     """A loud, low-noise warning on stderr when confidence is low.
 
     Fires only on "low" -- not "unmeasured", which just means the stability
@@ -153,7 +153,7 @@ def _render_confidence_warning(result: Result, *, quiet: bool) -> None:
     stderr so stdout (and --json) stay parseable, and always exits 0: the
     result is a valid best guess, merely an uncertain one.
     """
-    if quiet or result.confidence != "low":
+    if result.confidence != "low":
         return
     sys.stdout.flush()  # keep banner after the summary when stdout is redirected
     rule = "-" * 66
@@ -207,14 +207,16 @@ def launcher(
         command, bound, _ = app.parse_args(tokens)
         out = bound.arguments.get("out")
         result = command(*bound.args, **bound.kwargs)
+        if result is None:  # no command given: cyclopts already printed the help
+            return 0
 
         if not quiet:
             print(result.summary())
             print(result.curve_plot())
-            _render_confidence_warning(result, quiet=quiet)
-        if out is not None and not quiet:
-            print(f"\ntruncated model written to {out}")
-            print(f"  load it as shown in {out}/README.md")
+            _render_confidence_warning(result)
+            if out is not None:
+                print(f"\ntruncated model written to {out}")
+                print(f"  load it as shown in {out}/README.md")
         if json_out is not None:
             json_out.parent.mkdir(parents=True, exist_ok=True)
             json_out.write_text(json.dumps(result.to_dict(), indent=2, default=str))

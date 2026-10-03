@@ -266,8 +266,7 @@ A `low` verdict prints a warning block, which will probably require you either t
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev install and workflow, and
-[RELEASING.md](RELEASING.md) for how a release is cut and published.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev install and workflow.
 
 ```bash
 pip install -e ".[dev]"

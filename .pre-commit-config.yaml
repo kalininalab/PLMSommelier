@@ -13,7 +13,7 @@ repos:
       - id: check-added-large-files   # default 500 kB; keeps model weights/embeddings out
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.5                      # matches the ruff pinned in uv.lock
+    rev: v0.16.5
     hooks:
       - id: ruff-check
         args: [--fix]

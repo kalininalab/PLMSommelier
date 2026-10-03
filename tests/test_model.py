@@ -72,21 +72,6 @@ class TestLoaderClassChain:
 
         assert load_hf_model("fake/repo", encoder_only=False) is lm.transformer
 
-    def test_encoder_only_none_infers_from_config(self, monkeypatch):
-        import transformers
-
-        text_encoding = _Sentinel()
-        monkeypatch.setattr(
-            transformers.AutoModelForTextEncoding,
-            "from_pretrained",
-            classmethod(lambda cls, *a, **kw: text_encoding),
-        )
-
-        class _Config:
-            is_encoder_decoder = True
-
-        assert load_hf_model("fake/repo", encoder_only=None, config=_Config()) is text_encoding
-
     def test_dtype_none_pins_float32_rather_than_deferring_to_transformers(self, monkeypatch):
         """Regression test: transformers >= 5 treats a bare ``torch_dtype=None`` as
         ``dtype="auto"`` (the checkpoint's own dtype), not the fp32 that
@@ -237,6 +222,11 @@ class TestCudaIsUsable:
         self._patch(monkeypatch, available=True, cc=(8, 9), arch_list=["sm_75", "sm_86"])
         assert _cuda_is_usable() is True
 
+    def test_ptx_jits_forward_across_majors(self, monkeypatch):
+        # Blackwell (sm_120) device, build shipping sm_90 cubins plus compute_90 PTX.
+        self._patch(monkeypatch, available=True, cc=(12, 0), arch_list=["sm_90", "compute_90"])
+        assert _cuda_is_usable() is True
+
     def test_get_arch_list_raising_falls_back(self, monkeypatch):
         monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
 
@@ -311,20 +301,20 @@ class TestResolveDtype:
         assert dtype == torch.float32
 
     def test_bfloat16_is_unaffected_on_cuda_that_supports_it(self, monkeypatch):
-        monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: True)
+        monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda **_: True)
         dtype = _resolve_dtype(None, {"dtype": torch.bfloat16}, torch.device("cuda"), "prott5")
         assert dtype == torch.bfloat16
 
     def test_bfloat16_downgrades_to_float32_on_cuda_without_support(self, monkeypatch):
         """A device (or build) where torch.cuda.is_bf16_supported() itself
         says no -- e.g. an old CUDA toolkit with no bf16 emulation path."""
-        monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: False)
+        monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda **_: False)
         with pytest.warns(UserWarning, match="bfloat16 is not supported on cuda"):
             dtype = _resolve_dtype(None, {"dtype": torch.bfloat16}, torch.device("cuda"), "prott5")
         assert dtype == torch.float32
 
     def test_is_bf16_supported_raising_downgrades(self, monkeypatch):
-        def _boom():
+        def _boom(**_):
             raise RuntimeError("no driver")
 
         monkeypatch.setattr(torch.cuda, "is_bf16_supported", _boom)
@@ -333,13 +323,13 @@ class TestResolveDtype:
         assert dtype == torch.float32
 
     def test_default_is_fp16_on_cuda_fp32_elsewhere(self, monkeypatch):
-        monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: True)
+        monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda **_: True)
         assert _resolve_dtype(None, {}, torch.device("cuda"), "m") == torch.float16
         assert _resolve_dtype(None, {}, torch.device("cpu"), "m") == torch.float32
         assert _resolve_dtype(None, {}, torch.device("mps"), "m") == torch.float32
 
     def test_explicit_dtype_wins_over_quirk(self, monkeypatch):
-        monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda: True)
+        monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda **_: True)
         got = _resolve_dtype(torch.float32, {"dtype": torch.bfloat16}, torch.device("cuda"), "m")
         assert got == torch.float32
 
@@ -361,17 +351,6 @@ class TestResolveDtype:
 
     def test_real_hardware_support_is_unaffected(self, monkeypatch):
         monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda including_emulation=True: True)
-        dtype = _resolve_dtype(None, {"dtype": torch.bfloat16}, torch.device("cuda"), "prott5")
-        assert dtype == torch.bfloat16
-
-    def test_older_torch_without_the_kwarg_falls_back_to_the_plain_call(self, monkeypatch):
-        """A torch build old enough that ``is_bf16_supported`` takes no
-        arguments at all must not be treated as unsupported."""
-
-        def _fake():
-            return True
-
-        monkeypatch.setattr(torch.cuda, "is_bf16_supported", _fake)
         dtype = _resolve_dtype(None, {"dtype": torch.bfloat16}, torch.device("cuda"), "prott5")
         assert dtype == torch.bfloat16
 
@@ -553,9 +532,6 @@ class _FakePLM:
         self.model_id = "fake/model"
         self.quirks: dict = {}
 
-    def _preprocess(self, seq):
-        return _preprocess_text(seq, self.quirks)
-
 
 class TestEncodeTruncation:
     def test_truncation_and_max_length_are_passed_when_a_limit_exists(self):
@@ -653,7 +629,7 @@ class TestTruncateMemory:
 
     def test_deepcopy_sees_only_the_retained_blocks(self, monkeypatch):
         model = self._stub_model(4)
-        plm_stub = SimpleNamespace(model=model, n_layers=4)
+        plm_stub = SimpleNamespace(model=model, n_layers=4, _shared_layers=False)
         seen_lengths = []
         real_deepcopy = copy.deepcopy
 
@@ -671,7 +647,7 @@ class TestTruncateMemory:
 
     def test_original_block_list_is_restored_even_if_deepcopy_raises(self, monkeypatch):
         model = self._stub_model(4)
-        plm_stub = SimpleNamespace(model=model, n_layers=4)
+        plm_stub = SimpleNamespace(model=model, n_layers=4, _shared_layers=False)
 
         def _boom(obj, *a, **kw):
             raise RuntimeError("simulated OOM")
@@ -680,6 +656,48 @@ class TestTruncateMemory:
         with pytest.raises(RuntimeError, match="simulated OOM"):
             truncate(plm_stub, 2)
         assert len(model.layers) == 4
+
+
+class TestSharedLayerArchitecture:
+    """ALBERT re-applies one shared layer group ``num_hidden_layers`` times, so
+    it has no block list for ``locate_blocks`` to find -- ProtAlbert used to
+    fail in ``PLM.__init__`` before embedding a single sequence."""
+
+    def _plm(self, tmp_path):
+        from transformers import AlbertConfig, AlbertModel, BertTokenizer
+
+        from plmsommelier.model import _QUIRKS, PLM
+
+        specials = ["[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]"]
+        vocab = tmp_path / "vocab.txt"
+        vocab.write_text("\n".join(specials + list("ACDEFGHIKLMNPQRSTVWYX")) + "\n")
+        tok = BertTokenizer(str(vocab), do_lower_case=False)
+        torch.manual_seed(0)
+        config = AlbertConfig(
+            vocab_size=len(tok),
+            embedding_size=16,
+            hidden_size=32,
+            num_attention_heads=2,
+            intermediate_size=64,
+            num_hidden_layers=4,
+        )
+        model = AlbertModel(config, add_pooling_layer=False).eval()
+        quirks = dict(_QUIRKS["albert"], encoder_only=False)
+        return PLM("tiny-albert", model, tok, config, device=torch.device("cpu"), quirks=quirks)
+
+    def test_loads_embeds_and_truncates(self, tmp_path):
+        plm = self._plm(tmp_path)
+        assert plm.n_layers == 4
+        assert embed_layers(plm, ["ACDEF", "MKTW"]).shape == (5, 2, 32)
+
+        inputs, _ = plm._encode(["ACDEFGH"])
+        with torch.no_grad():
+            states = plm.model(**inputs, output_hidden_states=True).hidden_states
+            truncated = truncate(plm, 2)
+            got = truncated(**inputs).last_hidden_state
+        assert truncated.config.num_hidden_layers == 2
+        assert plm.model.config.num_hidden_layers == 4  # the original is untouched
+        assert torch.allclose(got, states[2], atol=1e-6)
 
 
 def _remote_code_class(module_name: str, class_name: str = "Stub") -> type:

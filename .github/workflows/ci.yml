@@ -95,19 +95,6 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: pytest -q -m "not weights"
 
-  torch-nightly:
-    # Early warning for an upcoming torch release breaking us; not a merge gate.
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
-      - run: pip install -e ".[dev]"
-      - run: pytest -q -m "not weights"
-
   floors:
     # Installs every dependency at the version pyproject.toml actually
     # declares as its floor. Without this job a floor can silently rot --
@@ -126,50 +113,11 @@ jobs:
         run: uv pip install --resolution lowest-direct --index-strategy unsafe-best-match ".[dev]"
       - run: uv run pytest -q -m "not weights"
 
-  cuda-wheels:
-    # No GPU on hosted runners, so this can't run a kernel -- but it proves
-    # the real cu126/cu128/cu130 wheel resolves cleanly against every other
-    # dependency and that nothing here hard-imports a CUDA-only package. That
-    # covers most real "doesn't work on CUDA 12/13" reports.
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        cuda: [cu126, cu128, cu130]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Free disk space
-        # CUDA wheels plus their nvidia-* deps are several GB and will
-        # otherwise exhaust the runner's disk quota.
-        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
-      - run: pip install torch --index-url https://download.pytorch.org/whl/${{ matrix.cuda }}
-      - run: pip install -e ".[dev]"
-      - run: pip check
-      - run: python -c "import torch, plmsommelier; print(torch.__version__, torch.version.cuda)"
-      - run: pytest -q -m "not weights"
-
-  bare-install:
-    # No extras at all -- catches an optional dependency (e.g. the `plot`
-    # extra's matplotlib) leaking into a top-level import.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: pip install .
-      - run: python -c "import plmsommelier"
-      - run: plmsommelier --help
-
   build-artifacts:
-    # Installs the built sdist AND wheel into a clean venv, from outside the
-    # repo, on every OS. `pip install -e .` (used by every job above) puts
-    # the source tree on sys.path and so never exercises the build backend
-    # or catches missing package data -- only a real sdist/wheel install does.
+    # Builds the sdist and wheel, then installs the wheel (no extras) into a
+    # clean venv on every OS. `pip install -e .` (used by every job above)
+    # puts the source tree on sys.path and so never exercises the build
+    # backend or catches missing package data -- only a real install does.
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

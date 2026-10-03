@@ -377,7 +377,7 @@ class TestFitPredict:
         rng = np.random.default_rng(0)
         x = rng.normal(size=(100, 5))
         y = (x[:, :3] > 0).astype(int)
-        pred = fit_predict(x[:60], y[:60], x[60:], y[60:], task="multi-label", probe="knn")
+        pred = fit_predict(x[:60], y[:60], x[60:], task="multi-label", probe="knn")
         assert pred.shape == (40, 3)
 
     def test_unknown_probe_raises(self):
@@ -386,7 +386,6 @@ class TestFitPredict:
                 np.zeros((5, 2)),
                 np.zeros(5),
                 np.zeros((5, 2)),
-                np.zeros(5),
                 task="regression",
                 probe="xyz",
             )
@@ -399,7 +398,6 @@ class TestFitPredict:
                 np.zeros((0, 2)),
                 np.zeros(0),
                 np.zeros((5, 2)),
-                np.zeros(5),
                 task="regression",
             )
 
@@ -470,9 +468,9 @@ class TestSelectLayer:
         seen_val_lengths = []
         real_fit_predict = select_mod.fit_predict
 
-        def _spy(train_x, train_y, val_x, val_y, **kw):
+        def _spy(train_x, train_y, val_x, **kw):
             seen_val_lengths.append(len(val_x))
-            return real_fit_predict(train_x, train_y, val_x, val_y, **kw)
+            return real_fit_predict(train_x, train_y, val_x, **kw)
 
         monkeypatch.setattr(select_mod, "fit_predict", _spy)
         select_layer(ds, train, val, n_seeds=3, tolerance=0.0)
@@ -487,9 +485,9 @@ class TestSelectLayer:
         seen_val_lengths = set()
         real_fit_predict = select_mod.fit_predict
 
-        def _spy(train_x, train_y, val_x, val_y, **kw):
+        def _spy(train_x, train_y, val_x, **kw):
             seen_val_lengths.add(len(val_x))
-            return real_fit_predict(train_x, train_y, val_x, val_y, **kw)
+            return real_fit_predict(train_x, train_y, val_x, **kw)
 
         monkeypatch.setattr(select_mod, "fit_predict", _spy)
         select_layer(ds, train, val, n_seeds=3, tolerance=0.0)
@@ -531,12 +529,12 @@ class TestFeatureScaling:
 
     def test_knn_recovers_signal_drowned_out_by_an_unscaled_rogue_dimension(self):
         train_x, train_y, val_x, val_y = self._rogue_fixture()
-        pred = fit_predict(train_x, train_y, val_x, val_y, task="classification", probe="knn")
+        pred = fit_predict(train_x, train_y, val_x, task="classification", probe="knn")
         assert score(pred, val_y, "classification") > 0.5
 
     def test_lr_recovers_signal_drowned_out_by_an_unscaled_rogue_dimension(self):
         train_x, train_y, val_x, val_y = self._rogue_fixture()
-        pred = fit_predict(train_x, train_y, val_x, val_y, task="classification", probe="lr")
+        pred = fit_predict(train_x, train_y, val_x, task="classification", probe="lr")
         assert score(pred, val_y, "classification") > 0.5
 
     def test_constant_feature_does_not_produce_nan(self):
@@ -545,7 +543,7 @@ class TestFeatureScaling:
         y = rng.normal(size=n)
         x = np.stack([y, np.zeros(n)], axis=1).astype(np.float32)
         cut = n // 2
-        pred = fit_predict(x[:cut], y[:cut], x[cut:], y[cut:], task="regression", probe="knn")
+        pred = fit_predict(x[:cut], y[:cut], x[cut:], task="regression", probe="knn")
         assert not np.isnan(pred).any()
 
     def test_select_layer_is_not_misled_by_a_rogue_layer(self):

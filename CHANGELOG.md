@@ -7,12 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- ProtAlbert (and any ALBERT checkpoint) failed in `load_model` with "cannot
+  locate transformer blocks": ALBERT re-applies one shared layer group rather
+  than holding a block list. It now loads, embeds, and truncates by depth.
+- Running `plmsommelier` with no command printed the help, then crashed with
+  an `AttributeError` traceback. It now exits 0 after the help.
+- CUDA auto-detection treated `compute_X` (PTX) entries as same-major only, so
+  a newer GPU covered only by PTX fell back to CPU. PTX now counts for any
+  capability >= X.
+- An *inferred* multi-label task with a non-numeric label column died with
+  "could not convert string to float"; it now gets the same clear error as an
+  explicit `--task multi-label`.
+- Removed the "layer choice is unstable" note: it fired on exact seed
+  agreement and so contradicted the plateau-aware `confidence` verdict, which
+  already reports instability.
+
 ### Changed
 
-- Raised the declared minimum torch to `>=2.4` (from `>=2.0`). This corrects an
+- Raised the declared minimum torch to `>=2.5` (from `>=2.0`). This corrects an
   under-declared floor rather than adding a new restriction: transformers 5.x
   (`transformers>=5.9` has been required since 1.0.0) disables torch entirely
-  below 2.4, so torch 2.0-2.3 never actually worked with this package.
+  below 2.5, so torch 2.0-2.4 never actually worked with this package.
+- `fit_predict` no longer takes `val_y`; it was never used for prediction.
 
 ## [1.0.0] - 2026-09-09
 

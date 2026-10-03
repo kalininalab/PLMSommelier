@@ -12,7 +12,7 @@ name: Publish
 # If the repo is ever transferred to another owner, the trusted publisher
 # above must be re-created under the new owner/repo on both pypi.org and
 # test.pypi.org -- it's bound to owner/repo and does not follow a GitHub
-# redirect. See RELEASING.md.
+# redirect.
 
 on:
   push:

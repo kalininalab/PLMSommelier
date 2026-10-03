@@ -87,7 +87,6 @@ def fit_predict(
     train_x: np.ndarray,
     train_y: np.ndarray,
     val_x: np.ndarray,
-    val_y: np.ndarray,
     *,
     task: Task,
     probe: str = "knn",
@@ -101,9 +100,7 @@ def fit_predict(
 
     if task == "multi-label":
         cols = [
-            fit_predict(
-                train_x, train_y[:, c], val_x, val_y[:, c], task="classification", probe=probe, k=k
-            )
+            fit_predict(train_x, train_y[:, c], val_x, task="classification", probe=probe, k=k)
             for c in range(train_y.shape[1])
         ]
         return np.stack(cols, axis=1)
@@ -341,7 +338,7 @@ class Result:
         votes = []
 
         n_finite = self._n_finite_layers
-        wide_plateau = n_finite > 0 and len(self.plateau) > _WIDE_PLATEAU_FRACTION * n_finite
+        wide_plateau = len(self.plateau) > _WIDE_PLATEAU_FRACTION * n_finite
         agreement = self.plateau_agreement
         if not wide_plateau and math.isfinite(agreement):
             if agreement >= _HIGH_AGREEMENT:
@@ -388,7 +385,7 @@ class Result:
         out: list[str] = []
 
         n_finite = self._n_finite_layers
-        wide_plateau = n_finite > 0 and len(self.plateau) > _WIDE_PLATEAU_FRACTION * n_finite
+        wide_plateau = len(self.plateau) > _WIDE_PLATEAU_FRACTION * n_finite
         if wide_plateau and n_finite > 1:
             out.append(
                 f"the curve is genuinely flat: layers {self.plateau} score the same within "
@@ -466,7 +463,7 @@ class Result:
         if not scores:
             return ""
 
-        sigma = self.layer_sigma if self.seed_curves else {}
+        sigma = self.layer_sigma
         has_sigma = any(math.isfinite(v) for v in sigma.values())
 
         def _bound(layer: int) -> float:
@@ -573,7 +570,7 @@ def select_layer(
         vx, vy = _layer(val, layer), dataset.val_y
         if val_rows is not None:
             vx, vy = vx[val_rows], vy[val_rows]
-        pred = fit_predict(tx, ty, vx, vy, task=dataset.task, probe=probe, k=k)
+        pred = fit_predict(tx, ty, vx, task=dataset.task, probe=probe, k=k)
         return score(pred, vy, dataset.task)
 
     curve = {layer: _score_layer(layer) for layer in candidates}
@@ -623,11 +620,6 @@ def select_layer(
         )
     if best == n_layers:
         notes.append("the last layer won: truncation buys nothing on this dataset")
-    if seed_layers and agreement < 0.5:
-        notes.append(
-            "layer choice is unstable across resampling -- raise sample, or "
-            "treat the whole peak region as equally good"
-        )
 
     return Result(
         model=model_name,
