@@ -82,13 +82,14 @@ layer performance (pearson, +/- 1 sd across 5 seeds):
     6 +0.2369 #######################------   +/-0.0710  (last)
 ```
 
-You can also directly truncate a loaded model without probing via `truncate`:
+If you already know the appropriate layer, you can directly truncate a model without probing, you can also directly truncate a loaded model without probing via `truncate`:
+
 ```bash
 plmsommelier truncate --model facebook/esm2_t6_8M_UR50D --layer 2 --out ./my-esm-truncated
 ```
 
 The run returns `./my-esm-truncated` - a normal HuggingFace model directory containing the truncated model. It loads anywhere the original did, runs faster, and
-scores at least as well on your task:
+scores at least as well on your task (if it has been truncated from probing):
 
 ```python
 from transformers import AutoModel, AutoTokenizer
