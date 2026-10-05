@@ -145,6 +145,55 @@ def suggest_layer(
 app.command(suggest_layer, name="suggest")
 
 
+def truncate_model(
+    model: str,
+    layer: int,
+    out: Path,
+    *,
+    device: str | None = None,
+    cache_dir: str | None = None,
+    trust_remote_code: bool = False,
+) -> Result:
+    """Manually truncate a model to a specific layer and save it.
+
+    Parameters
+    ----------
+    model : str
+        a HuggingFace model id or a local path.
+    layer : int
+        the layer index to truncate to.
+    out : Path
+        directory to write the truncated model into.
+    device : str | None, optional
+        device to load the model onto; default: cuda, else mps, else cpu.
+    cache_dir : str | None, optional
+        HuggingFace cache directory.
+    trust_remote_code : bool, optional
+        needed for checkpoints that ship custom modeling code.
+    """
+    plm = load_model(model, device=device, cache_dir=cache_dir, trust_remote_code=trust_remote_code)
+
+    result = Result(
+        model=plm.model_id,
+        dataset="manual",
+        task="classification",
+        probe="manual",
+        best_layer=layer,
+        best_score=float("nan"),
+        last_layer=plm.n_layers,
+        last_layer_score=float("nan"),
+        curve={},
+        plateau=[layer],
+        n_train=0,
+        n_val=0,
+    )
+    save_truncated(plm, result, out)
+    return result
+
+
+app.command(truncate_model, name="truncate")
+
+
 def _render_confidence_warning(result: Result, *, quiet: bool) -> None:
     """A loud, low-noise warning on stderr when confidence is low.
 
@@ -204,11 +253,14 @@ def launcher(
         caught and rendered as ``error: ...``.
     """
     try:
-        command, bound, _ = app.parse_args(tokens)
+        command, bound, _ = app.parse_args(tokens, print_error=False, help_on_error=True)
         out = bound.arguments.get("out")
         result = command(*bound.args, **bound.kwargs)
 
-        if not quiet:
+        if result is None:
+            return 0
+
+        if not quiet and command is not truncate_model:
             print(result.summary())
             print(result.curve_plot())
             _render_confidence_warning(result, quiet=quiet)
