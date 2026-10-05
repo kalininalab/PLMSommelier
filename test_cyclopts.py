@@ -1,4 +1,5 @@
 import cyclopts
+
 app = cyclopts.App()
 @app.command
 def foo():
