@@ -172,7 +172,7 @@ def truncate_model(
         needed for checkpoints that ship custom modeling code.
     """
     plm = load_model(model, device=device, cache_dir=cache_dir, trust_remote_code=trust_remote_code)
-    
+
     result = Result(
         model=plm.model_id,
         dataset="manual",
