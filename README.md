@@ -82,6 +82,11 @@ layer performance (pearson, +/- 1 sd across 5 seeds):
     6 +0.2369 #######################------   +/-0.0710  (last)
 ```
 
+You can also directly truncate a loaded model without probing via `truncate`:
+```bash
+plmsommelier truncate --model facebook/esm2_t6_8M_UR50D --layer 2 --out ./my-esm-truncated
+```
+
 The run returns `./my-esm-truncated` - a normal HuggingFace model directory containing the truncated model. It loads anywhere the original did, runs faster, and
 scores at least as well on your task:
 
@@ -122,6 +127,14 @@ save_truncated(plm, result, "./my-esm-truncated")
 (`result.curve`), the per-seed scores behind the stability check
 (`result.seed_curves`, `result.layer_sigma`), and the `confidence` verdict --
 see [Confidence and what to do about it](#confidence-and-what-to-do-about-it).
+
+You can also truncate a loaded model directly without probing via `truncate`:
+```python
+from plmsommelier import load_model, truncate
+
+plm = load_model("facebook/esm2_t6_8M_UR50D")
+model = truncate(plm, 3)  # returns an nn.Module truncated to layer 3
+```
 
 ## Input format
 
