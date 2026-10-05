@@ -260,7 +260,7 @@ def launcher(
         if result is None:
             return 0
 
-        if not quiet and command != "truncate":
+        if not quiet and command is not truncate_model:
             print(result.summary())
             print(result.curve_plot())
             _render_confidence_warning(result, quiet=quiet)
