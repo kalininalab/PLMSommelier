@@ -10,9 +10,11 @@ tool finds the layer that is, and hands you back a truncated model.**
 
 Implements the tool described in [*Task- and dataset-specific information
 in protein language models*](https://arxiv.org/abs/2608.12090), which probed 13 PLMs across 15
-downstream tasks and found the deepest layer won in only **~20%** of cases.
+downstream tasks and found the deepest layer won in only ~20% of cases.
 
 ## Install
+
+Installation takes only a few minutes to download PyTorch and optional GPU dependencies.
 
 ```bash
 uv tool install plmsommelier   # isolated, no venv to manage yourself
@@ -51,7 +53,7 @@ that wheel targets; a driver too old for the chosen wheel is the usual cause.
 ## Quickstart
 
 Use the `examples/fluorescence_sample.csv` that ships in the repo (a 500-row subsample of
-the TAPE fluorescence benchmark).
+the TAPE fluorescence benchmark). The execution takes only a few minutes.
 
 ```bash
 plmsommelier suggest examples/fluorescence_sample.csv facebook/esm2_t6_8M_UR50D \
